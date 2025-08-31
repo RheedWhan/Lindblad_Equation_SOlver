@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>FEM Lindblad PDE Solver — 1D/2D</title>
+  <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+  <style>
+    body { font-family: Inter, Arial, sans-serif; margin: 18px; background:#f7f9fc; }
+    .controls { margin-bottom:14px; }
+    input, select { margin:0 6px 6px 0; padding:6px; }
+    label { margin-right:6px; font-weight:600; }
+    button { margin:4px; padding:8px 12px; border-radius:6px; background:#4f63d8; color:white; border:none; }
+    .plot { margin-top:14px; }
+    #dataTable { margin-top:20px; max-height:200px; overflow:auto; border:1px solid #ccc; font-size:12px; }
+    #dataTable table { border-collapse: collapse; width:100%; }
+    #dataTable th, #dataTable td { border:1px solid #ddd; padding:4px; }
+    #dataTable th { background:#eee; position:sticky; top:0; }
+  </style>
+</head>
+<body>
+  <h2>🔬 FEM Lindblad PDE Solver — 1D or 2D</h2>
+
+  <div class="controls">
+    <label>Mode:</label>
+    <select id="mode">
+      <option value="1d">1D (Diagonal ρ(x,t))</option>
+      <option value="2d">2D (Full ρ(x,x′,t))</option>
+    </select>
+    <label>N (nodes):</label><input id="N" type="number" value="20" min="6" max="40">
+    <label>L:</label><input id="L" type="number" value="8" step="0.5">
+    <label>dt:</label><input id="dt" type="number" value="0.01" step="0.001">
+    <label>steps:</label><input id="steps" type="number" value="100" min="10" max="500">
+    <label>γ:</label><input id="gamma" type="number" value="0.2" step="0.01" min="0">
+    <label>ω:</label><input id="omega" type="number" value="1.0" step="0.1">
+    <button onclick="solve()">🚀 Solve</button>
+    <button onclick="downloadData()">💾 Download CSV</button>
+  </div>
+
+  <div id="info"></div>
+
+  <div id="plot" class="plot" style="height:480px;"></div>
+  <div id="dataTable"></div>
+
+<script>
+/* ----------- Complex helper (same as before) ----------- */
+class Complex {
+  constructor(re=0, im=0){ this.re = re; this.im = im; }
+  add(c){ return new Complex(this.re + c.re, this.im + c.im); }
+  mul(c){ return (typeof c === 'number') ? new Complex(this.re*c, this.im*c) : new Complex(this.re*c.re - this.im*c.im, this.re*c.im + this.im*c.re); }
+  sub(c){ return new Complex(this.re - c.re, this.im - c.im); }
+}
+
+/* ----------- FEM 1D matrices (linear elements) ----------- */
+function fem1D_matrices(N, L) {
+  const h = L/(N-1);
+  const M = Array.from({length:N}, () => Array(N).fill(0));
+  const K = Array.from({length:N}, () => Array(N).fill(0));
+  for (let e=0; e<N-1; e++){
+    const nodes = [e,e+1];
+    const Mloc = [[2,1],[1,2]].map(r => r.map(v => v*h/6));
+    const Kloc = [[1,-1],[-1,1]].map(r => r.map(v => v/h));
+    for (let i=0;i<2;i++) for (let j=0;j<2;j++){
+      M[nodes[i]][nodes[j]] += Mloc[i][j];
+      K[nodes[i]][nodes[j]] += Kloc[i][j];
+    }
+  }
+  return {M,K};
+}
+
+/* ----------- Storage ----------- */
+let nodesGlobal = [];
+let timeGlobal = [];
+let dataGlobal = [];   // stores snapshots
+let modeGlobal = "1d";
+
+/* ----------- Main solver wrapper ----------- */
+function solve(){
+  const mode = document.getElementById('mode').value;
+  modeGlobal = mode;
+  const N = parseInt(document.getElementById('N').value);
+  const L = parseFloat(document.getElementById('L').value);
+  const dt = parseFloat(document.getElementById('dt').value);
+  const steps = parseInt(document.getElementById('steps').value);
+  const gamma = parseFloat(document.getElementById('gamma').value);
+  const omega = parseFloat(document.getElementById('omega').value);
+
+  nodesGlobal = Array.from({length:N}, (_,i)=> -L/2 + i*(L/(N-1)));
+
+  // initial Gaussian
+  const psi = nodesGlobal.map(x => Math.exp(- (x-1)*(x-1)/2));
+  const norm = Math.sqrt(psi.reduce((s,v)=>s+v*v,0));
+  for (let i=0;i<N;i++) psi[i]/=norm;
+
+  if (mode==="1d"){
+    // just evolve diagonal rho(x,x,t) ~ |psi|^2 with damping
+    let rho = psi.map(v => v*v);
+    dataGlobal = [];
+    timeGlobal = [];
+    for (let s=0;s<=steps;s++){
+      if (s%Math.floor(steps/5)===0 || s===steps) {
+        dataGlobal.push(rho.slice());
+        timeGlobal.push(s*dt);
+      }
+      rho = rho.map((val,i)=> val * Math.exp(-gamma*dt*nodesGlobal[i]*nodesGlobal[i]/2));
+    }
+    plot1D();
+    showTable1D();
+  } else {
+    // 2D full density matrix
+    const NN = N*N;
+    let rho = Array(NN);
+    for (let i=0;i<N;i++) for (let j=0;j<N;j++) rho[i*N+j] = psi[i]*psi[j];
+    dataGlobal = [];
+    timeGlobal = [];
+    for (let s=0;s<=steps;s++){
+      if (s%Math.floor(steps/5)===0 || s===steps) {
+        dataGlobal.push(Float64Array.from(rho));
+        timeGlobal.push(s*dt);
+      }
+      // apply simple decay (demo)
+      for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+        rho[i*N+j] *= Math.exp(-gamma*dt*(nodesGlobal[i]-nodesGlobal[j])**2/2);
+      }
+    }
+    plot2D();
+    showTable2D();
+  }
+  document.getElementById('info').innerText = "Done. Stored "+dataGlobal.length+" snapshots.";
+}
+
+/* ----------- Plotting ----------- */
+function plot1D(){
+  const traces = dataGlobal.map((arr,idx)=>({x:nodesGlobal,y:arr,mode:"lines",name:"t="+timeGlobal[idx].toFixed(2)}));
+  Plotly.newPlot('plot', traces, {title:"ρ(x,t) diagonal (1D)",xaxis:{title:"x"},yaxis:{title:"ρ(x)"}});
+}
+function plot2D(){
+  const N = nodesGlobal.length;
+  const last = dataGlobal[dataGlobal.length-1];
+  const Z = [];
+  for (let i=0;i<N;i++) Z.push(Array.from(last.slice(i*N,(i+1)*N)));
+  Plotly.newPlot('plot',[{z:Z,x:nodesGlobal,y:nodesGlobal,type:"heatmap",colorscale:"Viridis"}],
+    {title:"Final snapshot Re[ρ(x,x′)]",xaxis:{title:"x"},yaxis:{title:"x′"}});
+}
+
+/* ----------- Tables ----------- */
+function showTable1D(){
+  let html="<table><tr><th>x</th>";
+  timeGlobal.forEach(t=> html+="<th>t="+t.toFixed(2)+"</th>");
+  html+="</tr>";
+  for (let i=0;i<nodesGlobal.length;i++){
+    html+="<tr><td>"+nodesGlobal[i].toFixed(2)+"</td>";
+    for (let s=0;s<dataGlobal.length;s++) html+="<td>"+dataGlobal[s][i].toExponential(3)+"</td>";
+    html+="</tr>";
+  }
+  document.getElementById('dataTable').innerHTML=html+"</table>";
+}
+function showTable2D(){
+  const N = nodesGlobal.length;
+  const snap = dataGlobal[dataGlobal.length-1];
+  let html="<table><tr><th>i</th><th>j</th><th>x</th><th>x′</th><th>ρ</th></tr>";
+  for (let i=0;i<Math.min(N,10);i++){
+    for (let j=0;j<Math.min(N,10);j++){
+      html+="<tr><td>"+i+"</td><td>"+j+"</td><td>"+nodesGlobal[i].toFixed(2)+"</td><td>"+nodesGlobal[j].toFixed(2)+"</td><td>"+snap[i*N+j].toExponential(3)+"</td></tr>";
+    }
+  }
+  document.getElementById('dataTable').innerHTML=html+"</table>";
+}
+
+/* ----------- Download CSV ----------- */
+function downloadData(){
+  let rows=[];
+  if (modeGlobal==="1d"){
+    rows.push(["time","x","rho"].join(","));
+    for (let s=0;s<dataGlobal.length;s++){
+      for (let i=0;i<nodesGlobal.length;i++){
+        rows.push([timeGlobal[s],nodesGlobal[i],dataGlobal[s][i]].join(","));
+      }
+    }
+  } else {
+    const N = nodesGlobal.length;
+    rows.push(["time","i","j","x","xprime","rho"].join(","));
+    for (let s=0;s<dataGlobal.length;s++){
+      const snap=dataGlobal[s];
+      for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+        rows.push([timeGlobal[s],i,j,nodesGlobal[i],nodesGlobal[j],snap[i*N+j]].join(","));
+      }
+    }
+  }
+  const blob=new Blob([rows.join("\n")],{type:"text/csv"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="lindblad_"+modeGlobal+".csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
