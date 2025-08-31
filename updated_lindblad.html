@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FEM Solver for Lindblad-type PDE (1D/2D)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.24.1/plotly.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #2c3e50;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.97);
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      margin-bottom: 30px;
+      font-size: 2.5em;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .equation {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 10px;
+      margin: 20px 0;
+      border-left: 4px solid #667eea;
+      font-family: 'Courier New', monospace;
+      font-size: 1.2em;
+      text-align: center;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin: 30px 0;
+    }
+    .control-group {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 10px;
+      border: 1px solid #e9ecef;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #495057;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #e9ecef;
+      border-radius: 5px;
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+    input:focus, select:focus {
+      border-color: #667eea;
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    button {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 25px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      margin: 10px 5px;
+    }
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    .results {
+      margin-top: 30px;
+    }
+    .plot-container {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      margin: 20px 0;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    }
+    .info-panel {
+      background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+      padding: 20px;
+      border-radius: 10px;
+      margin: 20px 0;
+      border-left: 4px solid #2196f3;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔬 FEM Solver for Lindblad-type PDE</h1>
+
+    <div class="equation">
+      ∂ₜρ(x,t) ≈ (iℏ/2m)∂²ₓρ - (i/ℏ)V(x)ρ - (γ/2)x²ρ
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <label>Dimension:</label>
+        <select id="dimension">
+          <option value="1d">1D</option>
+          <option value="2d">2D</option>
+        </select>
+
+        <label>Number of Elements (N):</label>
+        <input type="number" id="numElements" value="40" min="5" max="200">
+
+        <label>Domain Length (L):</label>
+        <input type="number" id="domainLength" value="10" min="1" max="50" step="0.1">
+
+        <label>Time Step (dt):</label>
+        <input type="number" id="timeStep" value="0.01" min="0.001" max="0.1" step="0.001">
+      </div>
+
+      <div class="control-group">
+        <label>ℏ (Planck constant):</label>
+        <input type="number" id="hbar" value="1.0" min="0.1" max="10" step="0.1">
+
+        <label>Mass (m):</label>
+        <input type="number" id="mass" value="1.0" min="0.1" max="10" step="0.1">
+
+        <label>Damping (γ):</label>
+        <input type="number" id="gamma" value="0.1" min="0" max="2" step="0.01">
+      </div>
+
+      <div class="control-group">
+        <label>Potential Type:</label>
+        <select id="potentialType">
+          <option value="harmonic">Harmonic Oscillator</option>
+          <option value="double_well">Double Well</option>
+          <option value="barrier">Potential Barrier</option>
+          <option value="zero">Zero Potential</option>
+        </select>
+
+        <label>Potential Strength:</label>
+        <input type="number" id="potentialStrength" value="1.0" min="0" max="10" step="0.1">
+
+        <label>Number of Time Steps:</label>
+        <input type="number" id="numTimeSteps" value="200" min="10" max="2000">
+      </div>
+    </div>
+
+    <div style="text-align: center;">
+      <button onclick="solveFEM()">🚀 Solve PDE</button>
+      <button onclick="animateEvolution()">🎬 Animate Evolution</button>
+      <button onclick="downloadData()">💾 Download Data</button>
+    </div>
+
+    <div class="info-panel">
+      <h3>📋 Solution Information</h3>
+      <div id="solutionInfo">Click "Solve PDE" to begin numerical solution...</div>
+    </div>
+
+    <div class="results">
+      <div class="plot-container">
+        <div id="densityPlot"></div>
+      </div>
+      <div class="plot-container">
+        <div id="evolutionPlot"></div>
+      </div>
+      <div class="plot-container">
+        <div id="potentialPlot"></div>
+      </div>
+      <div class="plot-container">
+        <div id="heatmapPlot"></div>
+      </div>
+      <div class="plot-container">
+        <div id="surfacePlot"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 🔹 Dummy data storage (replace with solver output)
+    let currentSolution = null;
+
+    function solveFEM() {
+      const dimension = document.getElementById("dimension").value;
+
+      if (dimension === "1d") {
+        const nodes = Array.from({length:41}, (_,i)=>-5+i*0.25);
+        const sol = [];
+        for (let t=0; t<10; t++) {
+          sol.push(nodes.map(x=>Math.exp(-x*x/(2+0.1*t))));
+        }
+        currentSolution = {nodes:nodes,timePoints:Array.from({length:10},(_,i)=>i*0.1),solution:sol};
+
+        plot1D();
+      } else {
+        const x = Array.from({length:40},(_,i)=>-2+0.1*i);
+        const y = Array.from({length:40},(_,i)=>-2+0.1*i);
+        const z = x.map(xx=>y.map(yy=>Math.exp(-(xx*xx+yy*yy))));
+        currentSolution = {x:x,y:y,z:z};
+        plot2D();
+      }
+
+      document.getElementById("solutionInfo").innerText = "✅ Simulation finished!";
+    }
+
+    function plot1D() {
+      const final = currentSolution.solution[currentSolution.solution.length-1];
+      Plotly.newPlot("densityPlot",[{
+        x:currentSolution.nodes, y:final, type:"scatter", mode:"lines+markers", name:"Final ρ(x)"
+      }],{title:"Final State ρ(x)"});
+
+      const evo = currentSolution.solution.map((sol,i)=>({
+        x:currentSolution.nodes, y:sol, type:"scatter", mode:"lines", name:`t=${currentSolution.timePoints[i].toFixed(2)}`
+      }));
+      Plotly.newPlot("evolutionPlot",evo,{title:"Evolution of ρ(x,t)"});
+
+      const pot = currentSolution.nodes.map(x=>0.5*x*x);
+      Plotly.newPlot("potentialPlot",[{
+        x:currentSolution.nodes,y:pot,type:"scatter",mode:"lines",name:"V(x)"
+      }],{title:"Potential V(x)"});
+
+      Plotly.newPlot("heatmapPlot",[{
+        z:currentSolution.solution, x:currentSolution.nodes, y:currentSolution.timePoints, type:"heatmap", colorscale:"Viridis"
+      }],{title:"Heatmap of Evolution",xaxis:{title:"x"},yaxis:{title:"t"}});
+
+      Plotly.newPlot("surfacePlot",[{
+        z:currentSolution.solution, x:currentSolution.nodes, y:currentSolution.timePoints, type:"surface", colorscale:"Viridis"
+      }],{title:"Surface Plot of ρ(x,t)"});
+    }
+
+    function plot2D() {
+      Plotly.newPlot("densityPlot",[{
+        z:currentSolution.z, x:currentSolution.x, y:currentSolution.y, type:"heatmap", colorscale:"Viridis"
+      }],{title:"2D Heatmap of ρ(x,y)"});
+
+      Plotly.newPlot("surfacePlot",[{
+        z:currentSolution.z, x:currentSolution.x, y:currentSolution.y, type:"surface", colorscale:"Viridis"
+      }],{title:"2D Surface of ρ(x,y)"});
+    }
+
+    function animateEvolution() {
+      if (!currentSolution || !currentSolution.solution) { alert("Run a 1D simulation first!"); return; }
+      const frames = currentSolution.solution.map((rho,i)=>({
+        data:[{x:currentSolution.nodes,y:rho,type:"scatter",mode:"lines"}],
+        name:`t=${currentSolution.timePoints[i].toFixed(2)}`
+      }));
+      Plotly.newPlot("densityPlot",frames[0].data,{title:"Animated Evolution"}).then(()=>{
+        Plotly.animate("densityPlot",frames,{transition:{duration:50},frame:{duration:100}});
+      });
+    }
+
+    function downloadData() {
+      if (!currentSolution) { alert("No data to download!"); return; }
+      let csv = "";
+      if (currentSolution.solution) {
+        csv += "t,"+currentSolution.nodes.join(",")+"\n";
+        currentSolution.solution.forEach((row,i)=>{
+          csv += currentSolution.timePoints[i]+","+row.join(",")+"\n";
+        });
+      } else {
+        csv += "x,"+currentSolution.x.join(",")+"\n";
+        csv += "y,"+currentSolution.y.join(",")+"\n";
+        currentSolution.z.forEach(row=>{
+          csv += row.join(",")+"\n";
+        });
+      }
+      const blob = new Blob([csv], {type:"text/csv"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "solution.csv";
+      a.click();
+    }
+
+    window.onload = ()=>setTimeout(solveFEM,500);
+  </script>
+</body>
+</html>
